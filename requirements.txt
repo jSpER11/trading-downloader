@@ -3,6 +3,7 @@ numpy
 ta
 schedule
 python-dotenv
-git+https://github.com/StreamAlpha/tvdatafeed.git
 joblib
 streamlit
+websocket-client
+requests
