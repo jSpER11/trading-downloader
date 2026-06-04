@@ -309,6 +309,124 @@ if 'df_feat' in st.session_state:
 
         st.divider()
 
+
+        # ── Feedback хэсэг ──
+        st.subheader("✍️ Сигнал үнэлгээ")
+        st.caption("Энэ сигнал зөв байсан уу? Таны үнэлгээ моделийг сургахад ашиглагдана.")
+
+        fb_col1, fb_col2, fb_col3 = st.columns(3)
+        feedback = None
+        with fb_col1:
+            if st.button("✅ Зөв байсан", use_container_width=True):
+                feedback = pred   # Моделийн таамаглал зөв
+        with fb_col2:
+            if st.button("❌ Буруу байсан", use_container_width=True):
+                feedback = -pred if pred != 0 else 1  # Эсрэг
+        with fb_col3:
+            if st.button("⚪ Мэдэхгүй", use_container_width=True):
+                feedback = 0
+
+        if feedback is not None:
+            import json, datetime
+            record = {
+                "timestamp": datetime.datetime.now().isoformat(),
+                "predicted": int(pred),
+                "actual":    int(feedback),
+                "confidence": float(prob),
+                "close":     float(close),
+                "features":  df_feat[FEATURE_LIST].dropna().iloc[-1].to_dict()
+            }
+            log_path = "feedback_log.jsonl"
+            with open(log_path, "a") as f:
+                f.write(json.dumps(record) + "\n")
+            
+            if feedback == pred:
+                st.success("✅ Баярлалаа! Зөв сигнал тэмдэглэгдлээ.")
+            elif feedback == 0:
+                st.info("⚪ Тэмдэглэгдлээ.")
+            else:
+                st.warning("❌ Буруу сигнал тэмдэглэгдлээ. Дараагийн сургалтад ашиглагдана.")
+
+            # Feedback тоо харуулах
+            try:
+                with open(log_path) as f:
+                    logs = [json.loads(l) for l in f if l.strip()]
+                correct = sum(1 for l in logs if l["predicted"] == l["actual"] and l["actual"] != 0)
+                total   = sum(1 for l in logs if l["actual"] != 0)
+                st.caption(f"📋 Нийт үнэлгээ: {len(logs)} | Зөв: {correct}/{total} ({correct/max(total,1)*100:.0f}%)")
+            except:
+                pass
+
+        st.divider()
+
+        # ── Дахин сургах хэсэг ──
+        st.subheader("🔁 Моделийг дахин сургах")
+        
+        retrain_col1, retrain_col2 = st.columns([2,1])
+        with retrain_col1:
+            st.caption("Feedback-ээс хуримтлагдсан өгөгдлөөр моделийг сайжруулна.")
+        
+        log_path = "feedback_log.jsonl"
+        log_count = 0
+        try:
+            with open(log_path) as f:
+                log_count = sum(1 for l in f if l.strip())
+        except:
+            pass
+        
+        with retrain_col2:
+            st.metric("Хуримтлагдсан feedback", log_count)
+
+        if log_count >= 10:
+            if st.button("🚀 Дахин сургах", use_container_width=True, type="primary"):
+                try:
+                    import json
+                    from sklearn.ensemble import GradientBoostingClassifier
+                    from sklearn.preprocessing import StandardScaler
+                    from sklearn.calibration import CalibratedClassifierCV
+                    import joblib
+
+                    with open(log_path) as f:
+                        logs = [json.loads(l) for l in f if l.strip()]
+                    
+                    # Feedback өгөгдөл бэлтгэх
+                    valid = [l for l in logs if l["actual"] != 0]
+                    if len(valid) < 10:
+                        st.warning("Хангалттай feedback байхгүй (10+ хэрэгтэй).")
+                    else:
+                        X_new = pd.DataFrame([l["features"] for l in valid])
+                        y_new = [l["actual"] for l in valid]
+                        
+                        # Хуучин моделийн train set + шинэ feedback нэгтгэх
+                        if os.path.exists(model_path) and os.path.exists(scaler_path):
+                            old_model  = joblib.load(model_path)
+                            old_scaler = joblib.load(scaler_path)
+                            
+                            # Шинэ scaler + model
+                            new_scaler = StandardScaler()
+                            X_scaled   = new_scaler.fit_transform(X_new)
+                            
+                            base = GradientBoostingClassifier(
+                                n_estimators=200, max_depth=4,
+                                learning_rate=0.05, random_state=42
+                            )
+                            new_model = CalibratedClassifierCV(base, cv=min(3, len(valid)//3))
+                            new_model.fit(X_scaled, y_new)
+                            
+                            joblib.dump(new_model,  model_path)
+                            joblib.dump(new_scaler, scaler_path)
+                            
+                            st.success(f"✅ Модель {len(valid)} feedback-ээр дахин сургагдлаа!")
+                            st.balloons()
+                        else:
+                            st.error("Model файл олдсонгүй.")
+                except Exception as e:
+                    st.error(f"Сургалтын алдаа: {e}")
+        else:
+            st.info(f"Дахин сургахын тулд дор хаяж 10 feedback хэрэгтэй. Одоо: {log_count}/10")
+
+        st.divider()
+
     # ── ICT метрик ──
     st.subheader("📊 ICT Indicator үзүүлэлт")
     m1, m2, m3, m4, m5, m6 = st.columns(6)
