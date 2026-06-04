@@ -243,6 +243,47 @@ if run_btn:
 
 
 # ── Display ─────────────────────────────────────────────────────────────────────
+
+# ── TradingView Chart ───────────────────────────────────────────────────────────
+st.subheader("📊 XAUUSD Live Chart")
+
+tv_interval_map = {
+    "5 минут":  "5",
+    "15 минут": "15",
+    "1 цаг":    "60",
+}
+tv_interval = tv_interval_map.get(interval_label, "5")
+
+tradingview_widget = f"""
+<div class="tradingview-widget-container" style="height:520px;">
+  <div id="tradingview_chart" style="height:500px;"></div>
+  <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+  <script type="text/javascript">
+    new TradingView.widget({{
+      "autosize": true,
+      "symbol": "OANDA:XAUUSD",
+      "interval": "{tv_interval}",
+      "timezone": "Asia/Ulaanbaatar",
+      "theme": "dark",
+      "style": "1",
+      "locale": "en",
+      "toolbar_bg": "#0f0f1a",
+      "enable_publishing": false,
+      "hide_side_toolbar": false,
+      "allow_symbol_change": true,
+      "studies": [
+        "RSI@tv-basicstudies",
+        "MACD@tv-basicstudies"
+      ],
+      "container_id": "tradingview_chart"
+    }});
+  </script>
+</div>
+"""
+st.components.v1.html(tradingview_widget, height=520)
+
+st.divider()
+
 if 'df_feat' in st.session_state:
     df_feat = st.session_state['df_feat']
     df_raw  = st.session_state.get('df_raw', df_feat)
