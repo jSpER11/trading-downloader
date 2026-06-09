@@ -8,3 +8,4 @@ streamlit
 websocket-client
 requests
 scikit-learn==1.8.0
+plotly
