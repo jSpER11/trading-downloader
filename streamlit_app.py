@@ -244,43 +244,150 @@ if run_btn:
 
 # ── Display ─────────────────────────────────────────────────────────────────────
 
-# ── TradingView Chart ───────────────────────────────────────────────────────────
-st.subheader("📊 XAUUSD Live Chart")
+# ── Plotly Chart ────────────────────────────────────────────────────────────────
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
-tv_interval_map = {
-    "5 минут":  "5",
-    "15 минут": "15",
-    "1 цаг":    "60",
-}
-tv_interval = tv_interval_map.get(interval_label, "5")
+st.subheader("📊 XAUUSD Chart")
 
-tradingview_widget = f"""
-<div class="tradingview-widget-container" style="height:520px;">
-  <div id="tradingview_chart" style="height:500px;"></div>
-  <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-  <script type="text/javascript">
-    new TradingView.widget({{
-      "autosize": true,
-      "symbol": "OANDA:XAUUSD",
-      "interval": "{tv_interval}",
-      "timezone": "Asia/Ulaanbaatar",
-      "theme": "dark",
-      "style": "1",
-      "locale": "en",
-      "toolbar_bg": "#0f0f1a",
-      "enable_publishing": false,
-      "hide_side_toolbar": false,
-      "allow_symbol_change": true,
-      "studies": [
-        "RSI@tv-basicstudies",
-        "MACD@tv-basicstudies"
-      ],
-      "container_id": "tradingview_chart"
-    }});
-  </script>
-</div>
-"""
-st.components.v1.html(tradingview_widget, height=520)
+if 'df_feat' in st.session_state:
+    _df = st.session_state['df_feat'].copy()
+
+    fig = make_subplots(
+        rows=3, cols=1,
+        shared_xaxes=True,
+        row_heights=[0.60, 0.20, 0.20],
+        vertical_spacing=0.03,
+        subplot_titles=["XAUUSD Candlestick", "RSI-14", "MACD"],
+    )
+
+    # ── Candlestick ──
+    fig.add_trace(go.Candlestick(
+        x=_df.index,
+        open=_df['open'], high=_df['high'],
+        low=_df['low'],   close=_df['close'],
+        increasing_line_color='#00ff88',
+        decreasing_line_color='#ff4444',
+        name="XAUUSD",
+    ), row=1, col=1)
+
+    # ── EMA шугамууд ──
+    for span, color, label in [(8,'#ffaa00','EMA 8'), (21,'#4488ff','EMA 21'), (50,'#aa44ff','EMA 50')]:
+        fig.add_trace(go.Scatter(
+            x=_df.index,
+            y=_df['close'].ewm(span=span).mean(),
+            line=dict(color=color, width=1),
+            name=label, opacity=0.8,
+        ), row=1, col=1)
+
+    # ── BUY / SELL сигнал ──
+    if 'signal' in _df.columns:
+        buy_df  = _df[_df['signal'] == 1]
+        sell_df = _df[_df['signal'] == -1]
+        if len(buy_df):
+            fig.add_trace(go.Scatter(
+                x=buy_df.index,
+                y=buy_df['low'] * 0.9985,
+                mode='markers+text',
+                marker=dict(symbol='triangle-up', size=14, color='#00ff88',
+                            line=dict(color='#004422', width=1)),
+                text=['B'] * len(buy_df),
+                textposition='bottom center',
+                textfont=dict(color='#00ff88', size=9),
+                name='BUY',
+            ), row=1, col=1)
+        if len(sell_df):
+            fig.add_trace(go.Scatter(
+                x=sell_df.index,
+                y=sell_df['high'] * 1.0015,
+                mode='markers+text',
+                marker=dict(symbol='triangle-down', size=14, color='#ff4444',
+                            line=dict(color='#440000', width=1)),
+                text=['S'] * len(sell_df),
+                textposition='top center',
+                textfont=dict(color='#ff4444', size=9),
+                name='SELL',
+            ), row=1, col=1)
+
+    # ── TP / SL сүүлийн сигналийн ──
+    if 'pred' in st.session_state and st.session_state['pred'] != 0:
+        _pred  = st.session_state['pred']
+        _price = st.session_state['close']
+        tp = _price * (1 + 0.002 * _pred)
+        sl = _price * (1 - 0.001 * _pred)
+        fig.add_hline(y=tp, line_dash="dash", line_color="#00ff88", line_width=1.2,
+                      annotation_text=f"TP {tp:,.2f}", annotation_font_color="#00ff88",
+                      row=1, col=1)
+        fig.add_hline(y=sl, line_dash="dash", line_color="#ff4444", line_width=1.2,
+                      annotation_text=f"SL {sl:,.2f}", annotation_font_color="#ff4444",
+                      row=1, col=1)
+        fig.add_hline(y=_price, line_dash="dot", line_color="#ffffff", line_width=0.8,
+                      annotation_text=f"Entry {_price:,.2f}", annotation_font_color="#ffffff",
+                      row=1, col=1)
+
+    # ── FVG бүс (сүүлийн 50 candle) ──
+    _tail = _df.tail(200)
+    if 'bullish_fvg' in _tail.columns:
+        for idx, row in _tail[_tail['bullish_fvg'] == 1].iterrows():
+            fig.add_vrect(
+                x0=idx, x1=_df.index[-1],
+                fillcolor="#00ff88", opacity=0.05,
+                layer="below", line_width=0,
+                row=1, col=1,
+            )
+    if 'bearish_fvg' in _tail.columns:
+        for idx, row in _tail[_tail['bearish_fvg'] == 1].iterrows():
+            fig.add_vrect(
+                x0=idx, x1=_df.index[-1],
+                fillcolor="#ff4444", opacity=0.05,
+                layer="below", line_width=0,
+                row=1, col=1,
+            )
+
+    # ── RSI ──
+    if 'rsi_14' in _df.columns:
+        fig.add_trace(go.Scatter(
+            x=_df.index, y=_df['rsi_14'],
+            line=dict(color='#ffaa00', width=1.2), name='RSI-14',
+        ), row=2, col=1)
+        fig.add_hline(y=70, line_color='#ff4444', line_dash='dot', line_width=0.8, row=2, col=1)
+        fig.add_hline(y=30, line_color='#00ff88', line_dash='dot', line_width=0.8, row=2, col=1)
+        fig.add_hrect(y0=30, y1=70, fillcolor='#ffffff', opacity=0.02, row=2, col=1)
+
+    # ── MACD ──
+    if 'macd_hist' in _df.columns:
+        colors = ['#00ff88' if v >= 0 else '#ff4444' for v in _df['macd_hist'].fillna(0)]
+        fig.add_trace(go.Bar(
+            x=_df.index, y=_df['macd_hist'],
+            marker_color=colors, name='MACD Hist', opacity=0.8,
+        ), row=3, col=1)
+        if 'macd' in _df.columns:
+            fig.add_trace(go.Scatter(
+                x=_df.index, y=_df['macd'],
+                line=dict(color='#4488ff', width=1), name='MACD',
+            ), row=3, col=1)
+        if 'macd_sig' in _df.columns:
+            fig.add_trace(go.Scatter(
+                x=_df.index, y=_df['macd_sig'],
+                line=dict(color='#ff8844', width=1), name='Signal',
+            ), row=3, col=1)
+
+    fig.update_layout(
+        template='plotly_dark',
+        height=750,
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='#0d0d17',
+        legend=dict(orientation='h', y=1.02, x=0, font=dict(size=11)),
+        margin=dict(l=60, r=20, t=40, b=20),
+        xaxis_rangeslider_visible=False,
+    )
+    fig.update_yaxes(gridcolor='#1a1a2e', zerolinecolor='#1a1a2e')
+    fig.update_xaxes(gridcolor='#1a1a2e', showspikes=True, spikecolor='#555',
+                     spikesnap='cursor', spikemode='across')
+
+    st.plotly_chart(fig, use_container_width=True)
+else:
+    st.info("👈 Эхлээд **Ажиллуулах** товчийг дарна уу.")
 
 st.divider()
 
